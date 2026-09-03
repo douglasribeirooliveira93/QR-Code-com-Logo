@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gerador de QR Code com Logo</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 10px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+    #preview-area {
+      margin-top: 20px;
+      text-align: center;
+    }
+    #qrCanvas {
+      border: 1px solid #ccc;
+    }
+    #downloadLink,
+    #downloadPngLink {
+      display: inline-block;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Gerador de QR Code com Logomarca</h1>
+
+  <label for="linkInput">Link para gerar o QR Code:</label>
+  <input type="text" id="linkInput" placeholder="https://www.seusite.com" />
+
+  <button id="generateBtn">Gerar QR Code</button>
+
+  <div id="preview-area">
+    <h2>Pré-visualização (1000 x 1000 px)</h2>
+    <canvas id="qrCanvas" width="1000" height="1000"></canvas><br />
+    <a id="downloadLink" href="#" download="qrcode_logo.jpg" style="display:none;">
+      Baixar imagem (JPG com link em Comentários do Windows)
+    </a><br />
+    <a id="downloadPngLink" href="#" download="qrcode_logo.png" style="display:none;">
+      Baixar imagem (PNG com metadados técnicos)
+    </a>
+  </div>
+
+  <script>
+    const generateBtn = document.getElementById("generateBtn");
+    const linkInput = document.getElementById("linkInput");
+    const canvas = document.getElementById("qrCanvas");
+    const ctx = canvas.getContext("2d");
+    const downloadLink = document.getElementById("downloadLink");
+    const downloadPngLink = document.getElementById("downloadPngLink");
+    let downloadObjectUrl = null;
+    let downloadPngObjectUrl = null;
+
+    const crcTable = (() => {
+      const table = new Uint32Array(256);
+
+      for (let n = 0; n < 256; n++) {
+        let value = n;
+
+        for (let bit = 0; bit < 8; bit++) {
+          value = (value & 1) ? 0xEDB88320 ^ (value >>> 1) : value >>> 1;
+        }
+
+        table[n] = value >>> 0;
+      }
+
+      return table;
+    })();
+
+    // ---- LOGO FIXA ----
+    let logoImg = new Image();
+    let logoCarregada = false;
+
+    // A logo incorporada mantém a exportação disponível ao abrir o HTML diretamente
+    logoImg.onload = function () {
+      logoCarregada = true;
+    };
+    logoImg.src = "data:image/png;base64,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";
+
+    generateBtn.addEventListener("click", function () {
+      const text = linkInput.value.trim();
+
+      if (!text) {
+        alert("Digite o link para gerar o QR Code.");
+        return;
+      }
+
+      if (!logoCarregada) {
+        alert("A logomarca ainda não carregou. Aguarde um instante e tente novamente.");
+        return;
+      }
+
+      gerarQRCodeComLogo(text, logoImg);
+    });
+
+    async function gerarQRCodeComLogo(text, logoImg) {
+      // Limpa o canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      downloadLink.style.display = "none";
+      downloadPngLink.style.display = "none";
+
+      try {
+        // Gera o QR Code diretamente no canvas, 1000x1000 px
+        await QRCode.toCanvas(canvas, text, {
+          width: 1000,
+          margin: 2,
+          color: {
+            dark: "#000000",
+            light: "#FFFFFF"
+          },
+          errorCorrectionLevel: "H" // alta correção para suportar a perda da área central
+        });
+
+        // Reserva área central 200x200 para a logo
+        const logoSize = 200; // 200 x 200 pixels
+        const x = (canvas.width - logoSize) / 2;
+        const y = (canvas.height - logoSize) / 2;
+
+        // Limpa (pinta de branco) o quadrado central onde ficará a logo
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(x, y, logoSize, logoSize);
+
+        // Desenha a logomarca 200x200 no centro
+        ctx.drawImage(logoImg, x, y, logoSize, logoSize);
+
+        // Gera o PNG com metadados técnicos
+        const pngBlob = await canvasParaBlob(canvas, "image/png");
+        const pngComMetadados = await adicionarMetadadosPng(pngBlob, text);
+
+        if (downloadPngObjectUrl) {
+          URL.revokeObjectURL(downloadPngObjectUrl);
+        }
+
+        downloadPngObjectUrl = URL.createObjectURL(pngComMetadados);
+        downloadPngLink.href = downloadPngObjectUrl;
+        downloadPngLink.style.display = "inline-block";
+
+        // Gera o JPG com o link no campo Comentários reconhecido pelo Windows
+        const jpegBlob = await canvasParaBlob(canvas, "image/jpeg", 0.98);
+        const jpegComMetadados = await adicionarMetadadosJpeg(jpegBlob, text);
+
+        if (downloadObjectUrl) {
+          URL.revokeObjectURL(downloadObjectUrl);
+        }
+
+        downloadObjectUrl = URL.createObjectURL(jpegComMetadados);
+        downloadLink.href = downloadObjectUrl;
+        downloadLink.style.display = "inline-block";
+
+      } catch (err) {
+        // Apenas log no console, sem alert na tela
+        console.error("Erro ao gerar QR Code:", err);
+      }
+    }
+
+    function canvasParaBlob(canvas, tipo, qualidade) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+            return;
+          }
+
+          reject(new Error("Não foi possível gerar a imagem solicitada."));
+        }, tipo, qualidade);
+      });
+    }
+
+    async function adicionarMetadadosJpeg(jpegBlob, link) {
+      const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
+
+      if (jpegBytes[0] !== 0xFF || jpegBytes[1] !== 0xD8) {
+        throw new Error("O arquivo gerado não possui uma assinatura JPEG válida.");
+      }
+
+      const segmentoExif = criarSegmentoExif(link);
+
+      return new Blob(
+        [jpegBytes.slice(0, 2), segmentoExif, jpegBytes.slice(2)],
+        { type: "image/jpeg" }
+      );
+    }
+
+    function criarSegmentoExif(link) {
+      const campos = [
+        { tag: 0x010E, tipo: 2, dados: codificarAscii(`QR Code para ${link}`) },
+        { tag: 0x0131, tipo: 2, dados: codificarAscii("Gerador de QR Code com Logo") },
+        { tag: 0x9C9B, tipo: 1, dados: codificarUtf16Le("QR Code") },
+        { tag: 0x9C9C, tipo: 1, dados: codificarUtf16Le(link) }
+      ];
+      const inicioDosDados = 8 + 2 + campos.length * 12 + 4;
+      const tamanhoDosDados = campos.reduce(
+        (total, campo) => total + alinharEmDoisBytes(campo.dados.length),
+        0
+      );
+      const tiff = new Uint8Array(inicioDosDados + tamanhoDosDados);
+      const view = new DataView(tiff.buffer);
+
+      tiff[0] = 0x49;
+      tiff[1] = 0x49;
+      view.setUint16(2, 42, true);
+      view.setUint32(4, 8, true);
+      view.setUint16(8, campos.length, true);
+
+      let offsetDosDados = inicioDosDados;
+
+      campos.forEach((campo, index) => {
+        const entrada = 10 + index * 12;
+        view.setUint16(entrada, campo.tag, true);
+        view.setUint16(entrada + 2, campo.tipo, true);
+        view.setUint32(entrada + 4, campo.dados.length, true);
+
+        if (campo.dados.length <= 4) {
+          tiff.set(campo.dados, entrada + 8);
+          return;
+        }
+
+        view.setUint32(entrada + 8, offsetDosDados, true);
+        tiff.set(campo.dados, offsetDosDados);
+        offsetDosDados += alinharEmDoisBytes(campo.dados.length);
+      });
+
+      view.setUint32(10 + campos.length * 12, 0, true);
+
+      const cabecalhoExif = new Uint8Array([0x45, 0x78, 0x69, 0x66, 0, 0]);
+      const tamanhoDoSegmento = cabecalhoExif.length + tiff.length + 2;
+      const segmento = new Uint8Array(4 + cabecalhoExif.length + tiff.length);
+      const segmentoView = new DataView(segmento.buffer);
+
+      segmento[0] = 0xFF;
+      segmento[1] = 0xE1;
+      segmentoView.setUint16(2, tamanhoDoSegmento);
+      segmento.set(cabecalhoExif, 4);
+      segmento.set(tiff, 4 + cabecalhoExif.length);
+
+      return segmento;
+    }
+
+    function codificarAscii(texto) {
+      const textoAscii = texto
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\x20-\x7E]/g, "?");
+      const bytes = new Uint8Array(textoAscii.length + 1);
+
+      for (let index = 0; index < textoAscii.length; index++) {
+        bytes[index] = textoAscii.charCodeAt(index);
+      }
+
+      return bytes;
+    }
+
+    function codificarUtf16Le(texto) {
+      const bytes = new Uint8Array((texto.length + 1) * 2);
+      const view = new DataView(bytes.buffer);
+
+      for (let index = 0; index < texto.length; index++) {
+        view.setUint16(index * 2, texto.charCodeAt(index), true);
+      }
+
+      return bytes;
+    }
+
+    function alinharEmDoisBytes(tamanho) {
+      return tamanho + (tamanho % 2);
+    }
+
+    async function adicionarMetadadosPng(pngBlob, link) {
+      const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
+      const iendOffset = localizarChunkIend(pngBytes);
+      const chunks = [
+        criarChunkTextoPng("Comment", link),
+        criarChunkTextoPng("Description", `QR Code gerado para ${link}`),
+        criarChunkTextoPng("Source", link)
+      ];
+
+      return new Blob(
+        [pngBytes.slice(0, iendOffset), ...chunks, pngBytes.slice(iendOffset)],
+        { type: "image/png" }
+      );
+    }
+
+    function localizarChunkIend(pngBytes) {
+      const assinaturaPng = [137, 80, 78, 71, 13, 10, 26, 10];
+      const assinaturaValida = assinaturaPng.every((byte, index) => pngBytes[index] === byte);
+
+      if (!assinaturaValida) {
+        throw new Error("O arquivo gerado não possui uma assinatura PNG válida.");
+      }
+
+      let offset = assinaturaPng.length;
+
+      while (offset + 12 <= pngBytes.length) {
+        const tamanho = new DataView(
+          pngBytes.buffer,
+          pngBytes.byteOffset + offset,
+          4
+        ).getUint32(0);
+        const fimDoChunk = offset + 12 + tamanho;
+
+        if (fimDoChunk > pngBytes.length) {
+          break;
+        }
+
+        const tipo = String.fromCharCode(...pngBytes.slice(offset + 4, offset + 8));
+
+        if (tipo === "IEND") {
+          return offset;
+        }
+
+        offset = fimDoChunk;
+      }
+
+      throw new Error("O chunk IEND não foi encontrado no PNG gerado.");
+    }
+
+    function criarChunkTextoPng(palavraChave, texto) {
+      const encoder = new TextEncoder();
+      const palavraChaveBytes = encoder.encode(palavraChave);
+      const textoBytes = encoder.encode(texto);
+      const dados = new Uint8Array(palavraChaveBytes.length + textoBytes.length + 5);
+      let offset = 0;
+
+      dados.set(palavraChaveBytes, offset);
+      offset += palavraChaveBytes.length;
+      dados[offset++] = 0; // fim da palavra-chave
+      dados[offset++] = 0; // texto sem compressão
+      dados[offset++] = 0; // método de compressão
+      dados[offset++] = 0; // idioma vazio
+      dados[offset++] = 0; // tradução da palavra-chave vazia
+      dados.set(textoBytes, offset);
+
+      return criarChunkPng("iTXt", dados);
+    }
+
+    function criarChunkPng(tipo, dados) {
+      const encoder = new TextEncoder();
+      const tipoBytes = encoder.encode(tipo);
+      const chunk = new Uint8Array(12 + dados.length);
+      const dataView = new DataView(chunk.buffer);
+
+      dataView.setUint32(0, dados.length);
+      chunk.set(tipoBytes, 4);
+      chunk.set(dados, 8);
+
+      const conteudoCrc = new Uint8Array(tipoBytes.length + dados.length);
+      conteudoCrc.set(tipoBytes, 0);
+      conteudoCrc.set(dados, tipoBytes.length);
+      dataView.setUint32(8 + dados.length, calcularCrc32(conteudoCrc));
+
+      return chunk;
+    }
+
+    function calcularCrc32(bytes) {
+      let crc = 0xFFFFFFFF;
+
+      for (const byte of bytes) {
+        crc = crcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
+      }
+
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+  </script>
+</body>
+</html>
